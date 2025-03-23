@@ -2,3 +2,11 @@ lib/cylib.c
 lib/cylib.cc
 lib/cylib.html
 lib/cylib.so
+.env
+env
+.venv
+venv
+__pycache__
+datasets/cityscapes
+configs/out
+weights/*
