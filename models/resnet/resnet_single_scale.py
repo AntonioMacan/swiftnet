@@ -135,10 +135,6 @@ class ResNet(nn.Module):
         self.efficient = efficient
         self.use_bn = use_bn
         self.separable = separable
-        self.register_buffer('img_mean', torch.tensor(mean).view(1, -1, 1, 1))
-        self.register_buffer('img_std', torch.tensor(std).view(1, -1, 1, 1))
-        if scale != 1:
-            self.register_buffer('img_scale', torch.tensor(scale).view(1, -1, 1, 1).float())
 
         self.detach_upsample_in = detach_upsample_in
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
@@ -229,11 +225,6 @@ class ResNet(nn.Module):
         return x, skip
 
     def forward_down(self, image):
-        if hasattr(self, 'img_scale'):
-            image /= self.img_scale
-        image -= self.img_mean
-        image /= self.img_std
-
         x = self.conv1(image)
         x = self.bn1(x)
         x = self.relu(x)

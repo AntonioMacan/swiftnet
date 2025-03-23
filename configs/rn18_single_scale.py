@@ -19,7 +19,7 @@ root = Path('datasets/cityscapes')      # add symbolic link to datasets folder f
 path = os.path.abspath(__file__)
 dir_path = os.path.dirname(path)
 
-evaluating = False                      # put to True if using the config only for evaluation of already trained model
+evaluating = True                      # put to True if using the config only for evaluation of already trained model
 random_crop_size = 768                  # crop size, adjust it if having problems with GPU capacity
 
 scale = 1
@@ -44,6 +44,7 @@ eval_each = 4                           # frequency of validation process, it wi
 trans_val = Compose(
     [Open(),
      RemapLabels(mapping, ignore_id=255, ignore_class=ignore_id),   # remap the labels if they have additional classes or are in color, but you need them in ids  # noqa
+     Normalize(scale=scale, mean=mean, std=std),  # normalize
      SetTargetSize(target_size=target_size, target_size_feats=target_size_feats),
      Tensor(),
      ]
@@ -57,6 +58,7 @@ else:
          RemapLabels(mapping, ignore_id=255, ignore_class=ignore_id),
          RandomFlip(),                      # data augmentation technique
          RandomSquareCropAndScale(random_crop_size, ignore_id=num_classes, mean=mean_rgb),      # data augmentation
+         Normalize(scale=scale, mean=mean, std=std),  # normalize
          SetTargetSize(target_size=target_size_crops, target_size_feats=target_size_crops_feats),
          Tensor(),
          ]
@@ -65,10 +67,13 @@ else:
 dataset_train = Cityscapes(root, transforms=trans_train, subset='train')
 dataset_val = Cityscapes(root, transforms=trans_val, subset='val')
 
-resnet = resnet18(pretrained=True, efficient=False, mean=mean, std=std, scale=scale)    # we are using resnet pretrained on Imagenet for faster convergence # noqa
-model = SemsegModel(resnet, num_classes)
+resnet = resnet18(pretrained=True, efficient=False)    # we are using resnet pretrained on Imagenet for faster convergence # noqa
+model = SemsegModel(resnet, num_classes, k=3, bias=False)
 if evaluating:
-    model.load_state_dict(torch.load('weights/rn18_single_scale/model_best.pt'))        # change the path with your model path # noqa
+    # Check if CUDA is available and use it, otherwise use CPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.load_state_dict(torch.load('weights/rn18_single_scale/model_best.pt', map_location=device))        # change the path with your model path # noqa
+    model.criterion = SemsegCrossEntropy(num_classes=num_classes, ignore_id=ignore_id)
 else:
     model.criterion = SemsegCrossEntropy(num_classes=num_classes, ignore_id=ignore_id)
     lr = 4e-4               # hyperparameres to change
