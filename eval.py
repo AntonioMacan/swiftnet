@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import importlib.util
 from evaluation import evaluate_semseg
+import torch
 
 
 def import_module(path):
@@ -22,7 +23,9 @@ if __name__ == '__main__':
 
     class_info = conf.dataset_val.class_info
 
-    model = conf.model.cuda()
+    # Check if CUDA is available and use it, otherwise use CPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = conf.model.to(device)
 
     for loader, name in conf.eval_loaders:
         iou, per_class_iou = evaluate_semseg(model, loader, class_info, observers=conf.eval_observers)

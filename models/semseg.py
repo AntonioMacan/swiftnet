@@ -56,7 +56,9 @@ class SemsegModel(nn.Module):
         }
 
     def do_forward(self, batch, image_size=None):
-        data = self.prepare_data(batch, image_size)
+        # Check if CUDA is available and use it, otherwise use CPU
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        data = self.prepare_data(batch, image_size, device)
         logits, additional = self.forward(**data)
         additional['model'] = self
         additional = {**additional, **data}
