@@ -19,12 +19,12 @@ root = Path('datasets/cityscapes')      # add symbolic link to datasets folder f
 path = os.path.abspath(__file__)
 dir_path = os.path.dirname(path)
 
-evaluating = True                      # put to True if using the config only for evaluation of already trained model
+evaluating = True                       # put to True if using the config only for evaluation of already trained model
 random_crop_size = 768                  # crop size, adjust it if having problems with GPU capacity
 
-scale = 1
-mean = [73.15, 82.90, 72.3]             # Imagenet parameters, adjust for different datasets and initialization
-std = [47.67, 48.49, 47.73]             # Imagenet parameter, adjust for different datasets and initialization
+scale = 255
+mean = Cityscapes.mean                  # adjust for different datasets and initialization
+std = Cityscapes.std                    # adjust for different datasets and initialization
 mean_rgb = tuple(np.uint8(scale * np.array(mean)))
 
 num_classes = Cityscapes.num_classes    # if working with something other than Cityscapes, implement and import that class  # noqa
