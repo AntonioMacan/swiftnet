@@ -134,7 +134,14 @@ class SpatialPyramidPooling(nn.Module):
         levels = []
         target_size = self.fixed_size if self.fixed_size is not None else x.size()[2:4]
 
-        ar = target_size[1] / target_size[0]
+        # Convert to Python numbers if needed
+        if isinstance(target_size[0], torch.Tensor):
+            h, w = target_size[0].item(), target_size[1].item()
+        else:
+            h, w = target_size
+
+        # Compute aspect ratio
+        ar = w / h
 
         x = self.spp[0].forward(x)
         levels.append(x)
