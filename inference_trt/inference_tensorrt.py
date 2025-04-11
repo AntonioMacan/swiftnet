@@ -43,19 +43,21 @@ def main():
     # Create TensorRT engine
     print("Building TensorRT engine...")
     start_time = time.time()
-    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-    builder = trt.Builder(TRT_LOGGER)
+    logger = trt.Logger(trt.Logger.WARNING)
+    builder = trt.Builder(logger)
     config = builder.create_builder_config()
-    config.max_workspace_size = 1 << 30  # 1 GB
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30) # 1GB
 
     network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(network_flags)
 
-    parser = trt.OnnxParser(network, TRT_LOGGER)
+    parser = trt.OnnxParser(network, logger)
     with open(args.onnx, 'rb') as model:
         parser.parse(model.read())
 
-    engine = builder.build_engine(network, config)
+    serialized_engine = builder.build_serialized_network(network, config)
+    runtime = trt.Runtime(logger)
+    engine = runtime.deserialize_cuda_engine(serialized_engine)
     build_time = time.time() - start_time
     print(f"TensorRT engine built in {build_time:.2f} seconds")
 
