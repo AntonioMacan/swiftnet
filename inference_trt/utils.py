@@ -35,4 +35,3 @@ def visualize_and_save_segmentation_result(predictions, output_path):
     colored_pred = to_color(predictions)
     colored_pred_img = Image.fromarray(colored_pred)
     colored_pred_img.save(output_path)
-    print(f"Saved segmentation result to: {output_path}")
