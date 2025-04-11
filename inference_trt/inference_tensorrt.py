@@ -2,98 +2,108 @@ import numpy as np
 import tensorrt as trt
 import pycuda.driver as cuda
 import pycuda.autoinit  # init CUDA context
-from PIL import Image
 import time
 import argparse
+from .utils import (
+    load_and_preprocess_image, 
+    visualize_and_save_segmentation_result
+)
 
-from torchvision.transforms import Compose
-from data.transform import Open, Normalize, Tensor, ColorizeLabels
-from data.cityscapes import Cityscapes
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='TensorRT inference using tensorrt')
+    parser.add_argument('--onnx', 
+                        type=str, 
+                        default='inference_trt/trt_model.onnx',
+                        help='Path to the ONNX model')
+    parser.add_argument('--image', 
+                        type=str, 
+                        default='datasets/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png',
+                        help='Path to the input image')
+    parser.add_argument('--output', 
+                        type=str, 
+                        default='inference_trt/inference_result_tensorrt.png',
+                        help='Path to save the segmentation output')
+    return parser.parse_args()
 
 
-# Cityscapes related
-scale = 255
-mean = Cityscapes.mean
-std = Cityscapes.std
-color_info = Cityscapes.color_info
-to_color = ColorizeLabels(color_info)
-
-def load_and_prepare_image(image_path):
-    transforms = Compose([
-        Open(),
-        Normalize(scale=scale, mean=mean, std=std),
-        Tensor()
-    ])
+def build_engine_onnx(onnx_path, workspace_size=1<<30):
+    """Build a TensorRT engine from the given ONNX file"""
     
-    # Load image
-    sample = {"image": image_path}
-    sample = transforms(sample)
-    
-    # Get preprocessed image tensor
-    image_tensor = sample["image"].unsqueeze(0).numpy().astype(np.float32)
-    return image_tensor
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--onnx', type=str, default='inference_trt/trt_model.onnx')
-    parser.add_argument('--image', type=str, default='datasets/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png')
-    parser.add_argument('--output', type=str, default='inference_trt/inference_result_tensorrt.png')
-    args = parser.parse_args()
-
-    # Create TensorRT engine
-    print("Building TensorRT engine...")
     start_time = time.time()
+
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
-    config = builder.create_builder_config()
-    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30) # 1GB
-
     network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(network_flags)
-
     parser = trt.OnnxParser(network, logger)
-    with open(args.onnx, 'rb') as model:
-        parser.parse(model.read())
 
+    with open(onnx_path, "rb") as model_file:
+        model_data = model_file.read()
+    if not parser.parse(model_data):
+        raise RuntimeError("Parser is not able to load ONNX model.")
+    
+    # Configure engine build
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_size)
+
+    # Build a serialized engine
     serialized_engine = builder.build_serialized_network(network, config)
+    if not serialized_engine:
+        raise RuntimeError("Failed to build a serialzed TensorRT network!")
+    
+    # Deserialize it into an engine
     runtime = trt.Runtime(logger)
     engine = runtime.deserialize_cuda_engine(serialized_engine)
-    build_time = time.time() - start_time
-    print(f"TensorRT engine built in {build_time:.2f} seconds")
+    engine_build_time = time.time() - start_time
+    if engine is None:
+        engine_build_time = None
+        raise RuntimeError("Failed to build TensorRT engine.")
+    
+    return engine, engine_build_time
 
-    # Load and preprocess image
-    print("Preprocessing image...")
-    input_data = load_and_prepare_image(args.image)
 
+def main():
+    args = parse_args()
+
+    print("[INFO] Building TensorRT engine from ONNX...")
+    engine, engine_build_time = build_engine_onnx(args.onnx)
+    print(f"[INFO]TensorRT engine built in {engine_build_time:.2f} seconds")
+
+    # Create an execution context and a CUDA stream
     context = engine.create_execution_context()
-    d_input = cuda.mem_alloc(1 * input_data.nbytes)
-    output_shape = (19, 1024, 2048)
-    output_size = int(np.prod(output_shape) * np.dtype(np.float32).itemsize)
-    d_output = cuda.mem_alloc(output_size)
-
     stream = cuda.Stream()
 
-    output_data = cuda.pagelocked_empty(int(np.prod(output_shape)), dtype=np.float32).reshape(output_shape)
+    # Load and preprocess the input image
+    print(f"[INFO] Loading and preprocessing image: {args.image}")
+    input_data = load_and_preprocess_image(args.image)
+    input_size = input_data.nbytes
 
-    # Run single inference
-    print("Running inference...")
+    # Model output for Cityscapes
+    output_shape = (1, 19, 1024, 2048)
+    output_size = int(np.prod(output_shape) * np.dtype(np.float32).itemsize)
+
+    # Allocate memory on the device (GPU)
+    d_input = cuda.mem_alloc(input_size)
+    d_output = cuda.mem_alloc(output_size)
+
+    # Pinned memory for outputs
+    h_output = cuda.pagelocked_empty(shape=output_shape, dtype=np.float32)
+
+    print("[INFO] Running inference...")
     start_time = time.time()
     cuda.memcpy_htod_async(d_input, input_data, stream)
     context.execute_async_v2(bindings=[int(d_input), int(d_output)], stream_handle=stream.handle)
-    cuda.memcpy_dtoh_async(output_data, d_output, stream)
+    cuda.memcpy_dtoh_async(h_output, d_output, stream)
     stream.synchronize()
     elapsed = time.time() - start_time
-    print(f"Inference time: {elapsed*1000:.2f} ms")
-
+    print(f"[INFO] Inference time: {elapsed*1000:.2f} ms")
+    
     # Process output
-    logits = output_data.reshape((19, 1024, 2048))
+    logits = h_output.reshape((19, 1024, 2048))
     pred = np.argmax(logits, axis=0).astype(np.uint8)
-
-    # Visualize and save segmentation result
-    colored_pred = to_color(pred)
-    colored_pred_img = Image.fromarray(colored_pred)
-    colored_pred_img.save(args.output)
-    print(f"Saved segmentation to: {args.output}")
+    visualize_and_save_segmentation_result(pred, args.output)
+    print(f"[INFO] Saved segmentation result to: {args.output}")
 
 
 if __name__ == '__main__':
