@@ -5,7 +5,7 @@ import pycuda.autoinit  # init CUDA context
 import time
 import argparse
 from .utils import (
-    load_and_preprocess_image, 
+    prepare_data, 
     visualize_and_save_segmentation_result
 )
 
@@ -16,15 +16,16 @@ def parse_args():
                         type=str, 
                         default='inference_trt/trt_model.onnx',
                         help='Path to the ONNX model')
-    parser.add_argument('--image', 
+    parser.add_argument('--dataset_path', 
                         type=str, 
-                        default='datasets/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png',
+                        default='datasets/cityscapes',
                         help='Path to the input image')
     parser.add_argument('--output', 
                         type=str, 
                         default='inference_trt/inference_result_tensorrt.png',
                         help='Path to save the segmentation output')
     return parser.parse_args()
+
 
 
 def build_engine_onnx(onnx_path, workspace_size=1<<30):
@@ -74,10 +75,14 @@ def main():
     context = engine.create_execution_context()
     stream = cuda.Stream()
 
-    # Load and preprocess the input image
-    print(f"[INFO] Loading and preprocessing image: {args.image}")
-    input_data = load_and_preprocess_image(args.image)
+    # Load test image
+    print(f"[INFO] Loading dataset from {args.dataset_path}...")
+    data_loader = prepare_data(args.dataset_path, 'val', 1)
+    loader_iter = iter(data_loader)
+    batch = next(loader_iter)
+    input_data = batch['image'].numpy().astype(np.float32)
     input_size = input_data.nbytes
+    print(f"[INFO] Test image loaded")
 
     # Model output for Cityscapes
     output_shape = (1, 19, 1024, 2048)
