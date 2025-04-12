@@ -1,31 +1,28 @@
 import numpy as np
 from PIL import Image
 from torchvision.transforms import Compose
-from data.transform import Open, Normalize, Tensor, ColorizeLabels
+from data.transform import Open, Normalize, Tensor, ColorizeLabels, custom_collate
 from data.cityscapes import Cityscapes
+from pathlib import Path
+from torch.utils.data import DataLoader, Subset
 
 
-def load_and_preprocess_image(image_path):
-    scale = 255
-    mean = Cityscapes.mean
-    std = Cityscapes.std
-
+def prepare_data(root_path, subset='val', num_images=None):
     transforms = Compose([
         Open(),
-        Normalize(scale=scale, mean=mean, std=std),
+        Normalize(scale=255, mean=Cityscapes.mean, std=Cityscapes.std),
         Tensor()
     ])
     
-    # Load image
-    sample = {"image": image_path}
-    sample = transforms(sample)
+    dataset = Cityscapes(Path(root_path), transforms=transforms, subset=subset)
     
-    # Add batch dimension
-    image_tensor = sample["image"].unsqueeze(0)   # (1, 3, H, W)
-
-    # Convert to numpy float32
-    image_np = image_tensor.numpy().astype(np.float32)
-    return image_np
+    if num_images and num_images < len(dataset):
+        indices = list(range(num_images))
+        dataset = Subset(dataset, indices)
+    
+    loader = DataLoader(dataset, batch_size=1, collate_fn=custom_collate)
+    
+    return loader
 
 
 def visualize_and_save_segmentation_result(predictions, output_path):
