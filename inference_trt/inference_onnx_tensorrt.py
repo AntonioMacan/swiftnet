@@ -4,7 +4,7 @@ import numpy as np
 import onnx
 import onnx_tensorrt.backend as backend
 from .utils import (
-    load_and_preprocess_image, 
+    prepare_data, 
     visualize_and_save_segmentation_result
 )
 
@@ -15,9 +15,9 @@ def parse_args():
                         type=str, 
                         default='inference_trt/trt_model.onnx',
                         help='Path to the ONNX model')
-    parser.add_argument('--image', 
+    parser.add_argument('--dataset_path', 
                         type=str,         
-                        default='datasets/cityscapes/leftImg8bit/val/frankfurt/frankfurt_000000_001016_leftImg8bit.png',
+                        default='datasets/cityscapes',
                         help='Path to the input image')
     parser.add_argument('--output', 
                         type=str, 
@@ -42,14 +42,18 @@ def main():
     engine, build_time = build_engine_onnx(args.onnx)
     print(f"[INFO] TensorRT engine built in {build_time:.2f} seconds")
     
-    # Load and preprocess image
-    print(f"[INFO] Processing image: {args.image}")
-    image_tensor = load_and_preprocess_image(args.image)
+    # Load test image
+    print(f"[INFO] Loading dataset from {args.dataset_path}...")
+    data_loader = prepare_data(args.dataset_path, 'val', 1)
+    loader_iter = iter(data_loader)
+    batch = next(loader_iter)
+    input_data = batch['image'].numpy().astype(np.float32)
+    print(f"[INFO] Test image loaded")
     
     # Run single inference
     print("[INFO] Running inference...")
     start_time = time.time()
-    output = engine.run(image_tensor)
+    output = engine.run(input_data)
     inference_time = time.time() - start_time
     print(f"[INFO] Inference completed in {inference_time*1000:.2f} ms")
     
