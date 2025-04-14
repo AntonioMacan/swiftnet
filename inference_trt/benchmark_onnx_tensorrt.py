@@ -27,15 +27,15 @@ def parse_args():
                         help='Dataset subset (train, val).')
     parser.add_argument('--num_images', 
                         type=int, 
-                        default=100,
+                        default=230,
                         help='Number of images to use from dataset.')
     parser.add_argument('--warmup', 
                         type=int, 
-                        default=20,
+                        default=50,
                         help='Number of warm-up inferences (not measured).')
     parser.add_argument('--measure', 
                         type=int, 
-                        default=100,
+                        default=180,
                         help='Number of inferences to measure.')
     return parser.parse_args()
 
