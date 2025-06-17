@@ -11,3 +11,5 @@ datasets/cityscapes
 configs/out
 weights/*
 *.onnx
+trt/engine_cache
+trt/results
