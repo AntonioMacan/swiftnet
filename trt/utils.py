@@ -1,14 +1,15 @@
 from PIL import Image
 from torchvision.transforms import Compose
-from data.transform import Open, Normalize, Tensor, ColorizeLabels, custom_collate
+from data.transform import Open, Normalize, Tensor, Resize, ColorizeLabels, custom_collate
 from data.cityscapes import Cityscapes
 from pathlib import Path
 from torch.utils.data import DataLoader, Subset
 
 
-def prepare_data(root_path, subset='val', num_images=None):
+def prepare_data(root_path, subset='val', num_images=None, image_size=(1024, 2048)):
     transforms = Compose([
         Open(),
+        Resize((image_size[1], image_size[0])),
         Normalize(scale=255, mean=Cityscapes.mean, std=Cityscapes.std),
         Tensor()
     ])
