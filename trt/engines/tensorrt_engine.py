@@ -23,8 +23,7 @@ class TensorRTEngine(InferenceEngine):
     def load_model(self, model_path, input_shape, output_channels=19, workspace_size=1 << 30):
         """
         Builds TensorRT engine from ONNX.
-
-        input_shape: (B, C, H, W) — dummy input shape
+        input_shape: (B, C, H, W)
         """
         B, C, H, W = input_shape
         output_shape = (B, output_channels, H, W)
@@ -48,21 +47,34 @@ class TensorRTEngine(InferenceEngine):
         self.engine = runtime.deserialize_cuda_engine(serialized_engine)
         self.context = self.engine.create_execution_context()
 
-        # Allocate memory
-        input_nbytes = B * C * H * W * np.float32().nbytes
-        output_nbytes = np.prod(output_shape) * np.float32().nbytes
-        self.d_input = cuda.mem_alloc(int(input_nbytes))
-        self.d_output = cuda.mem_alloc(int(output_nbytes))
-        self.h_output = cuda.pagelocked_empty(shape=output_shape, dtype=np.float32)
-
         return time.time() - runtime.start_time if hasattr(runtime, "start_time") else 0.0
+
+    def allocate_buffers(self, input_shape, output_shape):
+        """Allocates GPU memory for inference."""
+        input_nbytes = int(np.prod(input_shape) * np.dtype(np.float32).itemsize)
+        output_nbytes = int(np.prod(output_shape) * np.dtype(np.float32).itemsize)
+
+        self.d_input = cuda.mem_alloc(input_nbytes)
+        self.d_output = cuda.mem_alloc(output_nbytes)
+        self.h_output = cuda.pagelocked_empty(shape=output_shape, dtype=np.float32)
+        self.output_shape = output_shape
 
     def prepare_input(self, images):
         return images.numpy().astype(np.float32)
 
     def run(self, input_data):
+        if self.d_input is None or self.d_output is None:
+            batch_size, channels, height, width = input_data.shape
+            self.allocate_buffers(
+                input_shape=input_data.shape,
+                output_shape=(batch_size, 19, height, width)
+            )
+
         cuda.memcpy_htod_async(self.d_input, input_data, self.stream)
-        self.context.execute_async_v2(bindings=[int(self.d_input), int(self.d_output)], stream_handle=self.stream.handle)
+        self.context.execute_async_v2(
+            bindings=[int(self.d_input), int(self.d_output)],
+            stream_handle=self.stream.handle
+        )
         cuda.memcpy_dtoh_async(self.h_output, self.d_output, self.stream)
         self.stream.synchronize()
         return self.h_output
