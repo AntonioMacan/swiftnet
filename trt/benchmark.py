@@ -21,6 +21,12 @@ def parse_args():
     parser.add_argument("--resolutions", type=str, nargs="+", default=["1024x2048", "512x1024", "256x512"])
     return parser.parse_args()
 
+
+def compute_pixel_accuracy(pred1, pred2):
+    assert pred1.shape == pred2.shape, "Shape mismatch"
+    return np.mean(pred1 == pred2)
+
+
 def run_benchmark(engine, data_loader, n_warmup=50, n_inference=180):
     loader_iter = iter(data_loader)
 
@@ -61,9 +67,11 @@ def run_benchmark(engine, data_loader, n_warmup=50, n_inference=180):
         "total_time": times.sum()
     }
 
+
 def parse_resolution(res_str):
     h, w = map(int, res_str.lower().split("x"))
     return (h, w)
+
 
 def main():
     args = parse_args()
@@ -73,28 +81,63 @@ def main():
         height, width = parse_resolution(res)
         print(f"\n=== Benchmarking at {height}x{width} ===")
 
+        image_size = (height, width)
+        input_shape = (1, 3, height, width)
+        resolution_str = f"{height}x{width}"
+
+        # === Load inference engine ===
         if args.engine == "pytorch":
             engine = PyTorchEngine()
-            engine.load_model(args.weights, image_size=(height, width))
+            engine.load_model(args.weights, image_size=image_size)
         elif args.engine == "tensorrt":
-            onnx_path = f"trt/onnx/trt_model_{height}x{width}.onnx"
-            cache_path = os.path.join(args.engine_cache_dir, f"swiftnet_{height}x{width}.plan")
-            input_shape = (1, 3, height, width)
+            onnx_path = f"trt/onnx/trt_model_{resolution_str}.onnx"
+            cache_path = os.path.join(args.engine_cache_dir, f"swiftnet_{resolution_str}.plan")
             engine, build_time = TensorRTEngine.load_or_build(onnx_path, cache_path, input_shape)
         elif args.engine == "onnx-tensorrt":
             engine = ONNXTensorRTEngine()
-            engine.load_model(f"trt/onnx/trt_model_{height}x{width}.onnx")
+            engine.load_model(f"trt/onnx/trt_model_{resolution_str}.onnx")
         else:
             raise ValueError("Invalid engine selected")
 
         data_loader = prepare_data(
             args.dataset_path, subset="val",
             num_images=args.num_images,
-            image_size=(height, width)
+            image_size=image_size
         )
 
         result = run_benchmark(engine, data_loader, args.warmup, args.iterations)
-        result['resolution'] = f"{height}x{width}"
+        result['resolution'] = resolution_str
+
+        # === Pixel-wise accuracy (ako nije PyTorch engine) ===
+        if args.engine != "pytorch":
+            print("[INFO] Computing pixel-wise accuracy vs PyTorch...")
+
+            # Pokreni PyTorch model
+            torch_engine = PyTorchEngine()
+            torch_engine.load_model(args.weights, image_size=image_size)
+
+            torch_loader = prepare_data(
+                args.dataset_path, subset="val",
+                num_images=5,
+                image_size=image_size
+            )
+
+            batch = next(iter(torch_loader))
+            input_torch = torch_engine.prepare_input(batch['image'])
+            out_torch = torch_engine.run(input_torch)
+            preds_torch = [np.argmax(t, axis=0) for t in torch_engine.get_logits_from_output(out_torch)]
+
+            input_target = engine.prepare_input(batch['image'])
+            out_target = engine.run(input_target)
+            preds_target = [np.argmax(t, axis=0) for t in engine.get_logits_from_output(out_target)]
+
+            pixel_accs = [
+                compute_pixel_accuracy(p1, p2)
+                for p1, p2 in zip(preds_torch, preds_target)
+            ]
+            pixel_accuracy = sum(pixel_accs) / len(pixel_accs)
+            result["pixel_accuracy"] = pixel_accuracy
+
         results.append(result)
 
     for r in results:
@@ -102,6 +145,9 @@ def main():
         print(f"  Mean time: {r['mean_time']*1000:.2f} ms")
         print(f"  FPS: {r['fps']:.2f}")
         print(f"  Total time: {r['total_time']:.2f} s")
+        if "pixel_accuracy" in r:
+            print(f"  Pixel-wise accuracy vs PyTorch: {r['pixel_accuracy']*100:.2f}%")
+
 
 if __name__ == "__main__":
     main()
