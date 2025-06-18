@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import torch
 import tensorrt as trt
 import pycuda.driver as cuda
 import pycuda.autoinit
@@ -60,7 +61,10 @@ class TensorRTEngine(InferenceEngine):
         self.output_shape = output_shape
 
     def prepare_input(self, images):
-        return images.numpy().astype(np.float32)
+        """Prepare input for TensorRT engine"""
+        if isinstance(images, torch.Tensor):
+            return images.detach().cpu().numpy().astype(np.float32)
+        return images.astype(np.float32)
 
     def run(self, input_data):
         if self.d_input is None or self.d_output is None:
@@ -80,7 +84,15 @@ class TensorRTEngine(InferenceEngine):
         return self.h_output
 
     def get_logits_from_output(self, output):
-        return [output[i] for i in range(output.shape[0])]
+        """Convert output to list of per-image logits tensors for evaluation"""
+        # Convert numpy array to torch tensor for consistency with evaluation code
+        if isinstance(output, np.ndarray):
+            output_tensor = torch.from_numpy(output.copy())
+        else:
+            output_tensor = output
+        
+        # Return list of tensors, one per batch item
+        return [output_tensor[i] for i in range(output_tensor.shape[0])]
 
     # === Caching ===
     def save_engine(self, path):

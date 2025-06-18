@@ -38,7 +38,11 @@ class PyTorchEngine(InferenceEngine):
         return 0.0  # no build time for PyTorch
 
     def prepare_input(self, images):
-        return images.to(self.device)
+        """Prepare input for PyTorch engine"""
+        if isinstance(images, torch.Tensor):
+            return images.to(self.device)
+        else:
+            return torch.from_numpy(images).to(self.device)
 
     def run(self, input_data):
         with torch.no_grad():
@@ -46,4 +50,6 @@ class PyTorchEngine(InferenceEngine):
         return logits
 
     def get_logits_from_output(self, output):
-        return [output[i].detach().cpu().numpy() for i in range(output.shape[0])]
+        """Convert output to list of per-image logits tensors for evaluation"""
+        # For PyTorch, output is already a tensor, just split by batch
+        return [output[i] for i in range(output.shape[0])]
