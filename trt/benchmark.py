@@ -136,6 +136,11 @@ def evaluate_miou(engine, data_loader, class_info, ignore_id=19):
     return iou_acc, per_class_iou, pixel_acc
 
 
+def compute_pixel_accuracy(pred1, pred2):
+    assert pred1.shape == pred2.shape, "Shape mismatch"
+    return np.mean(pred1 == pred2)
+
+
 def run_benchmark(engine, data_loader, n_warmup=50, n_inference=180):
     loader_iter = iter(data_loader)
 
@@ -236,6 +241,30 @@ def main():
         result["miou"] = miou
         result["pixel_accuracy"] = pixel_acc
 
+        # === Pixel agreement vs PyTorch ===
+        if args.engine != "pytorch":
+            print("[INFO] Comparing predictions with PyTorch baseline...")
+            torch_engine = PyTorchEngine()
+            torch_engine.load_model(args.weights, image_size=image_size)
+
+            torch_loader = prepare_data(args.dataset_path, subset="val", image_size=image_size)
+            batch = next(iter(torch_loader))
+            input_torch = torch_engine.prepare_input(batch['image'])
+            out_torch = torch_engine.run(input_torch)
+            preds_torch = [np.argmax(t.cpu().numpy(), axis=0) for t in torch_engine.get_logits_from_output(out_torch)]
+
+            input_target = engine.prepare_input(batch['image'])
+            out_target = engine.run(input_target)
+            logits_target = engine.get_logits_from_output(out_target)
+            preds_target = [np.argmax(t.cpu().numpy(), axis=0) for t in logits_target]
+
+            pixel_accs = [
+                compute_pixel_accuracy(p1, p2)
+                for p1, p2 in zip(preds_torch, preds_target)
+            ]
+            pixel_accuracy = sum(pixel_accs) / len(pixel_accs)
+            result["engine_agreement"] = pixel_accuracy
+
         results.append(result)
 
     # Print results
@@ -245,7 +274,8 @@ def main():
         print(f"  FPS: {r['fps']:.2f}")
         print(f"  Total time: {r['total_time']:.2f} s")
         print(f"  mIoU: {r['miou']:.2f}%")
-        print(f"  Pixel accuracy: {r['pixel_accuracy']:.2f}%")
+        if args.engine != "pytorch":
+            print(f"  Pixel agreement vs PyTorch: {r['engine_agreement'] * 100:.2f}%")
 
 
 if __name__ == "__main__":
