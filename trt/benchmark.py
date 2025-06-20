@@ -22,12 +22,11 @@ def parse_args():
     parser.add_argument("--weights", type=str, default="weights/rn18_single_scale/model_best.pt")
     parser.add_argument("--onnx", type=str, default="trt/trt_model.onnx")
     parser.add_argument("--dataset_path", type=str, default="datasets/cityscapes")
-    parser.add_argument("--num_images", type=int, default=230)
+    parser.add_argument("--num_images", type=int, default=250)
     parser.add_argument("--warmup", type=int, default=50)
-    parser.add_argument("--iterations", type=int, default=180)
+    parser.add_argument("--iterations", type=int, default=200)
     parser.add_argument("--engine_cache_dir", type=str, default="trt/engine_cache")
     parser.add_argument("--resolutions", type=str, nargs="+", default=["1024x2048", "512x1024", "256x512"])
-    parser.add_argument("--eval_images", type=int, default=50, help="Number of images for mIoU evaluation")
     return parser.parse_args()
 
 
@@ -229,7 +228,6 @@ def main():
         # Prepare evaluation data with ground truth
         eval_loader, eval_dataset = prepare_evaluation_data(
             args.dataset_path, subset="val",
-            num_images=args.eval_images,
             image_size=image_size
         )
         
